@@ -3,6 +3,7 @@ package com.example.mobile.smarthousemobile;
 import android.app.PendingIntent;
 import android.appwidget.AppWidgetManager;
 import android.appwidget.AppWidgetProvider;
+import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 import android.os.AsyncTask;
@@ -26,115 +27,7 @@ import java.net.UnknownHostException;
  * Implementation of App Widget functionality.
  */
 public class NewAppWidget extends AppWidgetProvider {
-    static private AppWidgetManager _manager;
-    static private int[] _ids;
-    static private Context _context;
-    static boolean isLampOnline = false;
-    static boolean isLampOn = false;
-
-    public static String YOUR_AWESOME_ACTION = "YourAwesomeAction";
-    Intent _intent;
-
-
-
-    class ThreadRunnable implements Runnable {
-        @Override
-        public void run() {
-            System.out.println("Client init");
-
-            Socket receiver;
-            BufferedReader in;
-            PrintWriter out;
-
-            receiver = null;
-            in = null;
-            out = null;
-
-            while (true) {
-                receiver = null;
-                //Create socket connection
-                try {
-                    receiver = new Socket("flid.ddns.net", 10101);
-                    out = new PrintWriter(receiver.getOutputStream(), true);
-                    in = new BufferedReader(
-                            new InputStreamReader(receiver.getInputStream())
-                    );
-
-                    System.out.println("Connected, sending request...");
-
-                    out.println("{\"sensor\": \"nrf24l01\", \"type\": \"register\", \"msg_stream\": \"1\"}");
-                    out.flush();
-                    out.println("{\"sensor\": \"nrf24l01\", \"type\": \"get_state\", \"node_id\": 1}");
-                    out.flush();
-
-                    System.out.println("Listening...");
-
-                    while(true) {
-                        String response = in.readLine();
-                        if (response == null) break;
-                        System.out.println("Response received");
-                        System.out.println(response);
-
-                        JSONObject obj = new JSONObject(response);
-
-                        boolean isOnline = obj.getBoolean("is_online");
-
-                        int isOn = 0;
-                        if (!obj.isNull("state")) {
-                            isOn=obj.getJSONObject("state").getInt("power_on");
-                        }
-
-                        int resource;
-
-                        if (!isOnline) {
-                            resource = R.drawable.lamp_icon_disabled;
-                        }
-                        else if (isOn == 1) {
-                            resource =  R.drawable.lamp_icon_on;
-                        }
-                        else {
-                            resource =  R.drawable.lamp_icon_off;
-                        }
-
-                        for (int appWidgetId : _ids) {
-                            RemoteViews views = new RemoteViews(_context.getPackageName(), R.layout.new_app_widget);
-                            views.setImageViewResource(R.id.imageButton, resource);
-
-                            // Instruct the widget manager to update the widget
-                            _manager.updateAppWidget(appWidgetId, views);
-                        }
-                        isLampOnline = isOnline;
-                        isLampOn = isOn == 1;
-
-                    }
-                }
-                catch (InterruptedIOException e) {
-                    System.out.println("Client has been interrupted, exitting...");
-                    return;
-                }
-                catch (UnknownHostException e) {
-                    System.out.println("Unknown host");
-                }
-                catch  (IOException e) {
-                    System.out.println("I/O Error");
-                }
-                catch (Exception e) {
-                    e.printStackTrace();
-                }
-
-                System.out.println("Client disconnected, retrying...");
-                try {
-                    Thread.sleep(1000);
-                }
-                catch (Exception ex) {
-                    ex.printStackTrace();
-                }
-            }
-        }
-    };
-    private static ThreadRunnable thread_listener;
-    private static Thread client_thread = null;
-
+    static private Intent client_intent;
     class SendStateRunnable implements Runnable {
         boolean _state;
 
@@ -161,72 +54,62 @@ public class NewAppWidget extends AppWidgetProvider {
         }
     }
 
-
-    public void startClient() {
-        System.out.println("Starting the client");
-
-        if (client_thread != null) {
-            System.out.println("Already started");
-            return;
-        }
-        thread_listener = new ThreadRunnable();
-
-        client_thread = new Thread(thread_listener);
-        client_thread.start();
-    }
-
-    public void stopClient() {
-        System.out.println("Stopping the client");
-        client_thread.interrupt();
-        client_thread = null;
-    }
-
     @Override
     public void onReceive(Context context, Intent intent) {
 
-        super.onReceive(context, intent);
+        System.out.println("onReceive: " + intent.getAction());
 
-        if (intent.getAction().equals(YOUR_AWESOME_ACTION)) {
+        if (intent.getAction().equals(LampSensor.LAMP_MODE_SWITCH_ACTION)) {
             System.out.println("CLICK!!!");
             Thread th = new Thread(
-                new SendStateRunnable(!isLampOn)
+                new SendStateRunnable(!ClientService.lamp_sensor.isLampOn)
             );
             th.start();
-
+            return;
         }
+
+        super.onReceive(context, intent);
+    }
+
+    public static PendingIntent getPendingSelfIntent(Context context, String action) {
+        Intent intent = new Intent(context, NewAppWidget.class);
+        intent.setAction(action);
+        return PendingIntent.getBroadcast(context, 0, intent, 0);
     }
 
     @Override
     public void onUpdate(Context context, AppWidgetManager appWidgetManager, int[] appWidgetIds) {
         // There may be multiple widgets active, so update all of them
-        _manager = appWidgetManager;
-        _ids = appWidgetIds;
-        _context = context;
-
         System.out.println("Updating...");
+        super.onUpdate(context, appWidgetManager, appWidgetIds);
 
-        _intent = new Intent(context, NewAppWidget.class);
-        _intent.setAction(YOUR_AWESOME_ACTION);
-        PendingIntent pendingIntent = PendingIntent.getBroadcast(context, 0, _intent, 0);
-        RemoteViews views = new RemoteViews(_context.getPackageName(), R.layout.new_app_widget);
-        views.setOnClickPendingIntent(R.id.imageButton, pendingIntent);
-        for (int appWidgetId : appWidgetIds) {
-            appWidgetManager.updateAppWidget(appWidgetId, views);
-        }
+        RemoteViews views = new RemoteViews(context.getPackageName(), R.layout.new_app_widget);
+        views.setOnClickPendingIntent(
+            R.id.imageButton,
+            getPendingSelfIntent(context, LampSensor.LAMP_MODE_SWITCH_ACTION)
+        );
+        ComponentName thisWidget = new ComponentName(context, NewAppWidget.class);
+        appWidgetManager.updateAppWidget(thisWidget, views);
     }
 
     @Override
     public void onEnabled(Context context) {
         // Enter relevant functionality for when the first widget is created
-        startClient();
+        System.out.println("Initializing...");
+        super.onEnabled(context);
 
-
+        System.out.println("Launching the service...");
+        // Update the widgets via the service
+        Intent service_intent = new Intent(context.getApplicationContext(), ClientService.class);
+        context.startService(service_intent);
     }
 
     @Override
     public void onDisabled(Context context) {
         // Enter relevant functionality for when the last widget is disabled
-        stopClient();
+        Intent service_intent = new Intent(context.getApplicationContext(), ClientService.class);
+        context.stopService(service_intent);
+        super.onDisabled(context);
     }
 }
 

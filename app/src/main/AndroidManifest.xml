@@ -10,8 +10,6 @@
         android:label="SmartHouseMobile"
         android:supportsRtl="true"
         android:theme="@style/AppTheme">
-
-
         <receiver android:name=".NewAppWidget">
             <intent-filter>
                 <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
@@ -20,8 +18,12 @@
             <meta-data
                 android:name="android.appwidget.provider"
                 android:resource="@xml/new_app_widget_info" />
-
         </receiver>
+
+        <service
+            android:name=".ClientService"
+            android:enabled="true">
+        </service>
     </application>
 
 </manifest>
